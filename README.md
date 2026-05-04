@@ -9,3 +9,7 @@
 3. Configure the queue sequence for your startup software in the interface, then click the Save Configuration button at the top.
 
 4. Done! The software has automatically registered itself and taken over the system's startup permissions. From now on, it will silently manage your startup process in the background every time you boot up.
+
+<p align="center">
+  <img src="./fig/demo.png" width="80%" />
+</p>
