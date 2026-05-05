@@ -26,23 +26,30 @@ public class RegistryHijacker
 
     public bool DisableItem(AppItem item)
     {
-        bool success = ModifyStartupApprovedKey(item, GetDisabledValue());
-        // UWP 需要“双管齐下”：既修改沙盒状态，又修改 StartupApproved 供任务管理器显示
-        if (item.Source == StartupSource.UwpApp) success |= ModifyUwpState(item, 1); // State 1 = Disabled
+        bool success = false;
+        foreach (var source in item.Sources)
+        {
+            success |= ModifyStartupApprovedKey(item, GetDisabledValue(), source);
+            if (source == StartupSource.UwpApp) success |= ModifyUwpState(item, 1);
+        }
         return success;
     }
 
     public bool EnableItem(AppItem item)
     {
-        bool success = ModifyStartupApprovedKey(item, GetEnabledValue());
-        if (item.Source == StartupSource.UwpApp) success |= ModifyUwpState(item, 2); // State 2 = Enabled
+        bool success = false;
+        foreach (var source in item.Sources)
+        {
+            success |= ModifyStartupApprovedKey(item, GetEnabledValue(), source);
+            if (source == StartupSource.UwpApp) success |= ModifyUwpState(item, 2);
+        }
         return success;
     }
 
     // 核心副作用函数：修改注册表键值
-    private bool ModifyStartupApprovedKey(AppItem item, byte[] targetValue)
+    private bool ModifyStartupApprovedKey(AppItem item, byte[] targetValue, StartupSource source)
     {
-        var (rootKey, subKeyPath) = GetStartupApprovedPath(item.Source);
+        var (rootKey, subKeyPath) = GetStartupApprovedPath(source);
         if (rootKey == null || subKeyPath == null)
         {
             return false;
@@ -50,11 +57,11 @@ public class RegistryHijacker
 
         // UWP 在任务管理器 StartupApproved 里的键名规则是 FamilyName!TaskId
         string valueName = item.Name;
-        if (item.Source == StartupSource.UwpApp)
+        if (source == StartupSource.UwpApp)
         {
             valueName = item.Arguments.Replace('|', '!');
         }
-        else if (item.Source == StartupSource.StartupFolder || item.Source == StartupSource.CommonStartupFolder)
+        else if (source == StartupSource.StartupFolder || source == StartupSource.CommonStartupFolder)
         {
             // 启动文件夹必须匹配带后缀的完整文件名（如 .lnk），否则任务管理器无法建立映射
             if (!string.IsNullOrEmpty(item.FilePath))

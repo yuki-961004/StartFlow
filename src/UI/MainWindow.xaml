@@ -62,21 +62,6 @@
                     </Button>
                 </Grid>
             </DataTemplate>
-            
-            <DataTemplate x:Key="CurtainDragItemTemplate">
-                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1" CornerRadius="6" Padding="12,8" Margin="0,4">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Grid.Column="0" Glyph="&#xE700;" FontSize="12" Foreground="Gray" Margin="0,0,12,0" VerticalAlignment="Center" ToolTipService.ToolTip="Drag to reorder" />
-                        <TextBlock Grid.Column="1" Text="{Binding Name}" FontWeight="{Binding FontWeight}" Foreground="{Binding TextColor}" VerticalAlignment="Center" />
-                    </Grid>
-                </Border>
-            </DataTemplate>
             </ResourceDictionary>
         </Grid.Resources>
 
@@ -104,8 +89,6 @@
                               Label="Refresh List" ToolTipService.ToolTip="Refresh List" />
                 <AppBarButton x:Name="ThemeButton" Click="ThemeButton_Click" 
                               Label="Toggle Theme" ToolTipService.ToolTip="Toggle Theme" />
-                <AppBarButton Icon="Setting" Click="SettingsButton_Click" 
-                              Label="Settings" ToolTipService.ToolTip="Settings" />
             </CommandBar>
         </Grid>
 
@@ -206,17 +189,13 @@
                                         Background="{ThemeResource AppIconBackgroundBrush}"
                                         Margin="0,0,12,0">
                                     <Grid>
-                                        <FontIcon Glyph="{x:Bind IconGlyph}" FontSize="16" 
-                                                  Foreground="{ThemeResource AppIconForegroundBrush}"
-                                                  Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
+                                        <TextBlock Text="{x:Bind FallbackText}" FontSize="16" FontWeight="SemiBold"
+                                                   Foreground="{ThemeResource AppIconForegroundBrush}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
                                         <Image Source="{x:Bind AppIcon, Mode=OneWay}" 
                                                Width="24" Height="24" Stretch="Uniform" 
-                                               Visibility="{x:Bind RealIconVisibility, Mode=OneWay}"
-                                               RenderTransformOrigin="0.5,0.5">
-                                            <Image.RenderTransform>
-                                                <ScaleTransform ScaleX="{x:Bind IconScale}" ScaleY="{x:Bind IconScale}" />
-                                            </Image.RenderTransform>
-                                        </Image>
+                                               Visibility="{x:Bind RealIconVisibility, Mode=OneWay}" />
                                     </Grid>
                                 </Border>
                             </StackPanel>

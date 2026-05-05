@@ -71,7 +71,8 @@ public sealed partial class MainWindow : Window
     // UI 辅助方法：禁用组 (Disabled) 不需要一键静默按钮
     public static Visibility GetSilentButtonVisibility(string tierName)
     {
-        return string.Equals(tierName, "Disabled", StringComparison.OrdinalIgnoreCase) 
+        return (string.Equals(tierName, "Disabled", StringComparison.OrdinalIgnoreCase) || 
+                string.Equals(tierName, "Ignored", StringComparison.OrdinalIgnoreCase))
             ? Visibility.Collapsed : Visibility.Visible;
     }
 
@@ -152,7 +153,8 @@ public sealed partial class MainWindow : Window
     private async void ManageTiers_Click(object sender, RoutedEventArgs e)
     {
         _tempTiers = new System.Collections.ObjectModel.ObservableCollection<EditableTier>();
-        for (int i = 1; i < ViewModel.AvailableTiers.Count; i++)
+        // 跳过 0 (Disabled) 和 1 (Ignored) 保护它们不被修改
+        for (int i = 2; i < ViewModel.AvailableTiers.Count; i++)
         {
             _tempTiers.Add(new EditableTier { Name = ViewModel.AvailableTiers[i], OriginalIndex = i });
         }
@@ -294,7 +296,40 @@ public sealed partial class MainWindow : Window
         if (sender is FrameworkElement element && 
             element.DataContext is AppItemViewModel vm)
         {
-            ViewModel.OpenItemLocation(vm.Item);
+            var item = vm.Item;
+            
+            var stack = new StackPanel { Spacing = 10 };
+            
+            if (item.Sources.Length > 1)
+            {
+                stack.Children.Add(new TextBlock {
+                    Text = "Warning: This program has stubbornly registered itself as a startup item in multiple locations. If you intend to delete its startup trigger, please visit and clear them all:",
+                    TextWrapping = TextWrapping.Wrap
+                });
+            }
+            else
+            {
+                stack.Children.Add(new TextBlock {
+                    Text = "This program is registered as a startup item in the following location. Click to open:",
+                    TextWrapping = TextWrapping.Wrap
+                });
+            }
+
+            foreach (var source in item.Sources)
+            {
+                var btn = new Button { Content = $"Open {source}", HorizontalAlignment = HorizontalAlignment.Stretch };
+                btn.Click += (s, args) => ViewModel.OpenSpecificLocation(item, source);
+                stack.Children.Add(btn);
+            }
+
+            var dialog = new ContentDialog {
+                Title = item.Sources.Length > 1 ? "Multiple Registration Points Detected" : "Startup Item Location",
+                Content = stack,
+                CloseButtonText = "Close",
+                XamlRoot = this.Content.XamlRoot,
+                RequestedTheme = _currentTheme
+            };
+            _ = dialog.ShowAsync();
         }
     }
 
@@ -355,128 +390,6 @@ public sealed partial class MainWindow : Window
         var newTheme = _currentTheme == ElementTheme.Dark 
             ? ElementTheme.Light : ElementTheme.Dark;
         ApplyTheme(newTheme);
-    }
-
-    private async void SettingsButton_Click(object sender, RoutedEventArgs e)
-    {
-        var settings = ViewModel.GlobalSettings;
-        
-        var toggleEnable = new ToggleSwitch { Header = "Enable Transition Curtain (Wait For It)", IsOn = settings.EnableCurtain };
-        
-        var btnPickImage = new Button { Content = "Select Background Image" };
-        var txtImagePath = new TextBlock { Text = string.IsNullOrEmpty(settings.CurtainImagePath) ? "No image selected (Black background)" : settings.CurtainImagePath, TextWrapping = TextWrapping.Wrap, MaxWidth = 300, VerticalAlignment = VerticalAlignment.Center };
-        
-        var sliderBlur = new Slider { Header = "Blur Intensity", Minimum = 0, Maximum = 100, Value = settings.CurtainBlurOpacity * 100 };
-        var toggleSpinner = new ToggleSwitch { Header = "Show Loading Spinner", IsOn = settings.CurtainShowSpinner };
-        var toggleAnimation = new ToggleSwitch { Header = "Enable Water Ripple Animation", IsOn = settings.CurtainEnableAnimation };
-        var txtCurtainText = new TextBox { Header = "Loading Text", Text = settings.CurtainText, PlaceholderText = "e.g. Wait for it..." };
-        var btnPreview = new Button { Content = "Preview Curtain" };
-
-        // 构建可供拖拽排序的 T 级列表和特殊幕布长条
-        var dragList = new System.Collections.ObjectModel.ObservableCollection<CurtainDragItem>();
-        bool curtainAdded = false;
-        string initialMarker = $"--- {txtCurtainText.Text} ---";
-        
-        if (settings.TargetCurtainTier == 0) { dragList.Add(new CurtainDragItem { Name = initialMarker, IsCurtain = true }); curtainAdded = true; }
-        for (int i = 1; i < ViewModel.AvailableTiers.Count; i++)
-        {
-            dragList.Add(new CurtainDragItem { Name = ViewModel.AvailableTiers[i], IsCurtain = false });
-            if (!curtainAdded && settings.TargetCurtainTier == i)
-            {
-                dragList.Add(new CurtainDragItem { Name = initialMarker, IsCurtain = true });
-                curtainAdded = true;
-            }
-        }
-        if (!curtainAdded) dragList.Add(new CurtainDragItem { Name = initialMarker, IsCurtain = true });
-
-        // 实现实时联动：修改文本框时，拖拽列表中的长条名字也跟着变
-        txtCurtainText.TextChanged += (s, args) =>
-        {
-            foreach (var item in dragList)
-            {
-                if (item.IsCurtain)
-                {
-                    item.Name = $"--- {txtCurtainText.Text} ---";
-                    break;
-                }
-            }
-        };
-
-        var listView = new ListView { ItemsSource = dragList, CanReorderItems = true, AllowDrop = true, SelectionMode = ListViewSelectionMode.None, MaxHeight = 250, Margin = new Thickness(0, 10, 0, 0), ItemTemplate = (DataTemplate)((FrameworkElement)this.Content).Resources["CurtainDragItemTemplate"] };
-        
-        var containerStyle = new Style(typeof(ListViewItem));
-        containerStyle.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
-        containerStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(0)));
-        containerStyle.Setters.Add(new Setter(FrameworkElement.MinHeightProperty, 0.0));
-        listView.ItemContainerStyle = containerStyle;
-
-        var settingsPanel = new StackPanel { Spacing = 12, Margin = new Thickness(0, 20, 0, 0), Visibility = settings.EnableCurtain ? Visibility.Visible : Visibility.Collapsed };
-        settingsPanel.Children.Add(new TextBlock { Text = "Appearance Settings", FontWeight = Microsoft.UI.Text.FontWeights.Bold });
-        
-        var imagePanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-        imagePanel.Children.Add(btnPickImage);
-        imagePanel.Children.Add(txtImagePath);
-        settingsPanel.Children.Add(imagePanel);
-        
-        settingsPanel.Children.Add(sliderBlur);
-        settingsPanel.Children.Add(toggleSpinner);
-        settingsPanel.Children.Add(toggleAnimation);
-        settingsPanel.Children.Add(txtCurtainText);
-        settingsPanel.Children.Add(btnPreview);
-        
-        settingsPanel.Children.Add(new TextBlock { Text = "Drag the Curtain below to set when it dismisses:", FontWeight = Microsoft.UI.Text.FontWeights.Bold, Margin = new Thickness(0, 10, 0, 0) });
-        settingsPanel.Children.Add(listView);
-
-        toggleEnable.Toggled += (s, args) => { settingsPanel.Visibility = toggleEnable.IsOn ? Visibility.Visible : Visibility.Collapsed; };
-        
-        btnPickImage.Click += async (s, args) => {
-            var picker = new Windows.Storage.Pickers.FileOpenPicker();
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-            picker.ViewMode = Windows.Storage.Pickers.PickerViewMode.Thumbnail;
-            picker.FileTypeFilter.Add(".jpg"); picker.FileTypeFilter.Add(".jpeg"); picker.FileTypeFilter.Add(".png"); picker.FileTypeFilter.Add(".bmp");
-            var file = await picker.PickSingleFileAsync();
-            if (file != null) { txtImagePath.Text = file.Path; }
-        };
-
-        btnPreview.Click += async (s, args) => {
-            var previewWindow = new CurtainWindow(txtImagePath.Text == "No image selected (Black background)" ? "" : txtImagePath.Text, sliderBlur.Value / 100.0, toggleSpinner.IsOn, txtCurtainText.Text, toggleAnimation.IsOn);
-            previewWindow.Activate();
-            await Task.Delay(3000); // 预览 3 秒后自动关闭
-            await previewWindow.DismissAsync();
-        };
-
-        var rootPanel = new StackPanel { Spacing = 10 };
-        rootPanel.Children.Add(toggleEnable);
-        rootPanel.Children.Add(settingsPanel);
-
-        var dialog = new ContentDialog
-        {
-            Title = "Global Orchestrator Settings",
-            Content = new ScrollViewer { Content = rootPanel },
-            PrimaryButtonText = "Save",
-            CloseButtonText = "Cancel",
-            XamlRoot = this.Content.XamlRoot,
-            RequestedTheme = _currentTheme
-        };
-        var result = await dialog.ShowAsync();
-        if (result == ContentDialogResult.Primary)
-        {
-            settings.EnableCurtain = toggleEnable.IsOn;
-            settings.CurtainImagePath = txtImagePath.Text == "No image selected (Black background)" ? "" : txtImagePath.Text;
-            settings.CurtainBlurOpacity = sliderBlur.Value / 100.0;
-            settings.CurtainShowSpinner = toggleSpinner.IsOn;
-            settings.CurtainText = txtCurtainText.Text;
-            settings.CurtainEnableAnimation = toggleAnimation.IsOn;
-            
-            int tierCount = 0;
-            foreach (var item in dragList)
-            {
-                if (item.IsCurtain) break; // 探测幕布长条被拖到了哪个 T 级的后面
-                tierCount++;
-            }
-            settings.TargetCurtainTier = tierCount;
-            ViewModel.SaveGlobalSettings();
-        }
     }
 
     private void ToggleGroup_Click(object sender, RoutedEventArgs e)

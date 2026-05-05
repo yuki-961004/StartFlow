@@ -24,48 +24,62 @@ public class StartupItemScanner
 
     public IEnumerable<AppItem> ScanAll()
     {
-        var items = new List<AppItem>();
+        var rawItems = new List<AppItem>();
 
         // 1. 常规 Run 键和 RunOnce 键
-        items.AddRange(ScanRegistry(
+        rawItems.AddRange(ScanRegistry(
             Registry.CurrentUser,
             RunKeyPath,
             StartupSource.RegistryCurrentUser));
 
-        items.AddRange(ScanRegistry(
+        rawItems.AddRange(ScanRegistry(
             Registry.CurrentUser,
             RunOnceKeyPath,
             StartupSource.RegistryCurrentUserRunOnce));
 
-        items.AddRange(ScanRegistry(
+        rawItems.AddRange(ScanRegistry(
             Registry.LocalMachine,
             RunKeyPath,
             StartupSource.RegistryLocalMachine));
 
-        items.AddRange(ScanRegistry(
+        rawItems.AddRange(ScanRegistry(
             Registry.LocalMachine,
             RunOnceKeyPath,
             StartupSource.RegistryLocalMachineRunOnce));
 
-        items.AddRange(ScanRegistry(
+        rawItems.AddRange(ScanRegistry(
             Registry.LocalMachine,
             RunWow64KeyPath,
             StartupSource.RegistryLocalMachineWow64));
 
         // 2. 启动文件夹
-        items.AddRange(ScanStartupFolder(
+        rawItems.AddRange(ScanStartupFolder(
             Environment.SpecialFolder.Startup,
             StartupSource.StartupFolder));
 
-        items.AddRange(ScanStartupFolder(
+        rawItems.AddRange(ScanStartupFolder(
             Environment.SpecialFolder.CommonStartup,
             StartupSource.CommonStartupFolder));
 
         // 3. 专属扫描器：获取现代 UWP / 微软商店应用
         var uwpScanner = new UwpScanner();
-        items.AddRange(uwpScanner.ScanAllUwpStartupTasks());
+        rawItems.AddRange(uwpScanner.ScanAllUwpStartupTasks());
 
-        // 4. 扫描 StartupApproved，捕获被安全软件暴力删除的遗留“幽灵”项
+        // 4. [核心优化] 合并去重：如果发现同一个程序在多处注册了启动项，将其所有源合并为一个单一程序卡片
+        var mergedItems = new List<AppItem>();
+        var grouped = rawItems.GroupBy(x => new { 
+            Name = x.Name.ToLowerInvariant(), 
+            Target = x.FilePath.ToLowerInvariant() 
+        });
+
+        foreach (var g in grouped)
+        {
+            var first = g.First();
+            var combinedSources = g.SelectMany(x => x.Sources).Distinct().ToArray();
+            mergedItems.Add(AppItem.Create(first.Name, first.FilePath, first.Arguments, combinedSources));
+        }
+
+        // 5. 扫描 StartupApproved，捕获被安全软件暴力删除的遗留“幽灵”项
         var approvedItems = new List<AppItem>();
         approvedItems.AddRange(ScanStartupApproved(
             Registry.CurrentUser, ApprovedRunPath));
@@ -76,11 +90,11 @@ public class StartupItemScanner
         approvedItems.AddRange(ScanStartupApproved(
             Registry.LocalMachine, ApprovedFolder));
 
-        // 5. 合并去重：如果发现新名字，说明是残留在注册表中的历史幽灵项
+        // 6. 合并幽灵项：如果发现新名字，说明是残留在注册表中的历史幽灵项
         foreach (var approved in approvedItems)
         {
             // 兼容 UWP 的 TaskId 对比，防止重复扫描
-            bool exists = items.Any(x => 
+            bool exists = mergedItems.Any(x => 
                 x.Name.Equals(approved.Name, StringComparison.OrdinalIgnoreCase) ||
                 x.FilePath.Equals(approved.Name, StringComparison.OrdinalIgnoreCase) ||
                 (x.Source == StartupSource.UwpApp && 
@@ -89,11 +103,11 @@ public class StartupItemScanner
                 
             if (!exists)
             {
-                items.Add(approved);
+                mergedItems.Add(approved);
             }
         }
 
-        return items;
+        return mergedItems;
     }
 
     private IEnumerable<AppItem> ScanRegistry(

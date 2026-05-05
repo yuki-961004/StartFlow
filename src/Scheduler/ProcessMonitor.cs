@@ -19,9 +19,15 @@ public class ProcessMonitor
 
         // 2. 如果进程为空或瞬间退出 (例如 UWP 的 explorer 启动器)
         // 我们平滑降级为 2 秒的保护性延迟，防止下一个 T 级被瞬间并发拉起
+        if (process == null)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            return;
+        }
+
         try
         {
-            if (process == null || process.HasExited)
+            if (process.HasExited)
             {
                 await Task.Delay(TimeSpan.FromSeconds(2));
                 return;

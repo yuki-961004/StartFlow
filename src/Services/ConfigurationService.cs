@@ -61,7 +61,7 @@ public class ConfigurationService
     {
         return new List<string> 
         { 
-            "Disabled", "T1 (Fast)", "T2 (Normal)", "T3 (Delay)", "T4 (Late)" 
+            "Disabled", "Ignored", "T1 (Fast)", "T2 (Normal)", "T3 (Delay)", "T4 (Late)" 
         };
     }
 }

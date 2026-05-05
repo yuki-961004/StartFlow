@@ -8,42 +8,17 @@ namespace StartFlow.Scheduler;
 
 public class ProcessLauncher
 {
-    public enum ActivateOptions
-    {
-        None = 0x00000000,
-        DesignMode = 0x00000001,
-        NoErrorUI = 0x00000002,
-        NoSplashScreen = 0x00000004,
-        PreLaunch = 0x02000000 // UWP 后台静默启动的核心参数
-    }
-
-    [ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IApplicationActivationManager
-    {
-        int ActivateApplication(
-            [In, MarshalAs(UnmanagedType.LPWStr)] string appUserModelId,
-            [In, MarshalAs(UnmanagedType.LPWStr)] string arguments,
-            [In] ActivateOptions options,
-            [Out] out uint processId);
-        
-        int ActivateForFile([In] string appUserModelId, [In] IntPtr itemArray, [In] string verb, [Out] out uint processId);
-        int ActivateForProtocol([In] string appUserModelId, [In] IntPtr itemArray, [Out] out uint processId);
-    }
-
-    [ComImport, Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")]
-    private class ApplicationActivationManager { }
-
     // 纯函数风格的方法，输入 AppItem，安全地尝试启动并返回 Process 句柄
     public Process? Launch(AppItem item, bool isSilent = false)
     {
         // 对于遗留的幽灵项，或者没有有效路径的项，直接忽略以防报错
-        if (item.Source == StartupSource.RegistryGhostItem || 
+        if (item.Sources.Contains(StartupSource.RegistryGhostItem) || 
             string.IsNullOrWhiteSpace(item.FilePath))
         {
             return null;
         }
 
-        if (item.Source == StartupSource.UwpApp)
+        if (item.Sources.Contains(StartupSource.UwpApp))
         {
             return LaunchUwp(item.FilePath, isSilent);
         }
@@ -70,7 +45,9 @@ public class ProcessLauncher
                     !args.Contains("minimized", StringComparison.OrdinalIgnoreCase) &&
                     !args.Contains("background", StringComparison.OrdinalIgnoreCase))
                 {
-                    args = string.IsNullOrWhiteSpace(args) ? "--silent" : args + " --silent";
+                    // 智能注入：Qt/原生 Win32 多用 -silent，而 Electron 多用 --silent。
+                    // 同时注入两者以覆盖所有主流 UI 框架的静默解析规范，互不干扰。
+                    args = string.IsNullOrWhiteSpace(args) ? "-silent --silent" : args + " -silent --silent";
                 }
             }
 
@@ -103,23 +80,9 @@ public class ProcessLauncher
         {
             if (isSilent)
             {
-                try
-                {
-                    var activationManager = (IApplicationActivationManager)new ApplicationActivationManager();
-                    ActivateOptions options = ActivateOptions.PreLaunch | ActivateOptions.NoErrorUI;
-                    
-                    activationManager.ActivateApplication(aumid, string.Empty, options, out uint processId);
-                    
-                    if (processId > 0)
-                    {
-                        return Process.GetProcessById((int)processId);
-                    }
-                }
-                catch
-                {
-                    // 核心保护：如果 StartFlow 以管理员权限运行，调用 COM 激活 UWP 会直接抛出 Access Denied。
-                    // 遇到权限墙时，平滑跳出并降级到下方使用 explorer.exe 的原生方案，绝不让启动中断。
-                }
+                // 彻底放弃第三方手动静默拉起 UWP（极易引发弹窗或权限崩溃）。
+                // 现已改为：让 ViewModel 将静默 UWP 的注册表状态保持开启，交由 Windows 原生 BAM 完美后台静默调度。
+                return null;
             }
 
             // 微软官方推荐的拉起 UWP/Appx 的标准方式 (AUMID)
@@ -129,13 +92,6 @@ public class ProcessLauncher
                 Arguments = $@"shell:AppsFolder\{aumid}",
                 UseShellExecute = true
             };
-
-            if (isSilent)
-            {
-                // 如果 COM 激活失败并降级到了这里，通过最小化窗口尽力压制它弹出
-                startInfo.WindowStyle = ProcessWindowStyle.Minimized;
-            }
-
             return Process.Start(startInfo);
         }
         catch (Exception)

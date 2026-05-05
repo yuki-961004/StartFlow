@@ -22,9 +22,8 @@ public record ScheduleRule(
     public int OrderIndex { get; init; } = 0;
 
     // 提供纯函数，生成默认规则（例如默认分配到 T1 且无延迟）
-    public static ScheduleRule CreateDefault(Guid appItemId)
+    public static ScheduleRule CreateDefault(Guid appItemId, int defaultPriority = 2)
     {
-        int defaultPriority = 1;
         int defaultWaitTime = 0;
         
         return new ScheduleRule(

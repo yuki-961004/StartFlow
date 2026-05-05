@@ -23,15 +23,18 @@ public record AppItem(
     string Name,
     string FilePath,
     string Arguments,
-    StartupSource Source
+    StartupSource[] Sources
 )
 {
+    // 为了尽可能少地破坏老代码，提供一个便捷的首选来源属性
+    public StartupSource Source => Sources.Length > 0 ? Sources[0] : StartupSource.RegistryCurrentUser;
+
     // 提供一个纯函数工厂方法来创建实例，避免外部手动生成 Guid
     public static AppItem Create(
         string name, 
         string filePath, 
         string arguments, 
-        StartupSource source)
+        params StartupSource[] sources)
     {
         // 利用名称和路径生成固定的特征哈希，保证重启后能与配置文件精准匹配
         string idStr = $"{name}|{filePath}".ToLowerInvariant();
@@ -43,7 +46,7 @@ public record AppItem(
             name,
             filePath,
             arguments,
-            source
+            sources.Length > 0 ? sources : new[] { StartupSource.RegistryCurrentUser }
         );
     }
 }

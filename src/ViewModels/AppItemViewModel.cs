@@ -20,7 +20,17 @@ public class AppItemViewModel : INotifyPropertyChanged
     public AppItem Item { get; }
     private ScheduleRule _rule;
     public ObservableCollection<string> AvailableTiers { get; }
-    public string IconGlyph { get; private set; }
+    
+    // 生成无图标时的首字母文字头像 (例如 "Logitech" -> "L")
+    public string FallbackText
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(Item.Name)) return "?";
+            var firstChar = Item.Name.Trim().FirstOrDefault(c => char.IsLetterOrDigit(c));
+            return firstChar == '\0' ? "?" : firstChar.ToString().ToUpperInvariant();
+        }
+    }
     public ImageSource? AppIcon { get; private set; }
     
     public Visibility FallbackVisibility => 
@@ -29,9 +39,6 @@ public class AppItemViewModel : INotifyPropertyChanged
     public Visibility RealIconVisibility => 
         AppIcon != null ? Visibility.Visible : Visibility.Collapsed;
         
-    // UWP 图标因为自带巨大透明边距，我们在 UI 层将其进一步放大来抵消边距
-    public double IconScale => Item.Source == StartupSource.UwpApp ? 1.8 : 1.0;
-
     private bool _isVisible = true;
     public bool IsVisible
     {
@@ -57,7 +64,6 @@ public class AppItemViewModel : INotifyPropertyChanged
         Item = item;
         _rule = rule;
         AvailableTiers = availableTiers;
-        IconGlyph = "\uE718"; // 统一的默认 App 占位图标
         _ = LoadRealIconAsync(); // 触发异步加载真实图标
     }
 
@@ -114,12 +120,12 @@ public class AppItemViewModel : INotifyPropertyChanged
     // 核心黑科技：提取真实 EXE / LNK 文件的内置图标
     private async Task LoadRealIconAsync()
     {
-        if (Item.Source == StartupSource.RegistryGhostItem) return;
+        if (Item.Sources.Contains(StartupSource.RegistryGhostItem)) return;
 
         try
         {
             // 针对 UWP / 微软商店应用，调用 WinRT API 穿透沙盒提取真实高清图标
-            if (Item.Source == StartupSource.UwpApp)
+            if (Item.Sources.Contains(StartupSource.UwpApp))
             {
                 string aumid = Item.FilePath;
                 int bangIndex = aumid.IndexOf('!');
@@ -137,17 +143,19 @@ public class AppItemViewModel : INotifyPropertyChanged
                         var entry = entries.FirstOrDefault();
                         if (entry != null)
                         {
-                            // 请求 256x256 的高清尺寸，系统会自动下发最清晰的资产
+                            // 请求 256 高清尺寸，防止裁切后变糊
                             var streamRef = entry.DisplayInfo.GetLogo(
                                 new Windows.Foundation.Size(256, 256));
                             using var stream = await streamRef.OpenReadAsync();
+                            using var memStream = new MemoryStream();
+                            await stream.AsStreamForRead().CopyToAsync(memStream);
                             
-                            var bitmapImage = new BitmapImage();
-                            await bitmapImage.SetSourceAsync(stream);
-                            AppIcon = bitmapImage;
-                            OnPropertyChanged(nameof(AppIcon));
-                            OnPropertyChanged(nameof(FallbackVisibility));
-                            OnPropertyChanged(nameof(RealIconVisibility));
+                            // 通过后台线程智能裁切 UWP 图标的巨大透明废边
+                            byte[]? finalBytes = await Task.Run(() => AutoCropIcon(memStream.ToArray()));
+                            if (finalBytes != null)
+                            {
+                                await RenderIconFromBytesAsync(finalBytes);
+                            }
                         }
                     }
                 }
@@ -156,34 +164,114 @@ public class AppItemViewModel : INotifyPropertyChanged
 
             if (!File.Exists(Item.FilePath)) return;
 
-            byte[]? imageBytes = null;
-            await Task.Run(() =>
+            byte[]? imageBytes = await Task.Run<byte[]?>(() =>
             {
                 // 回滚：使用 .NET 原生、极度稳定的 Icon 提取器
                 using var icon = Icon.ExtractAssociatedIcon(Item.FilePath);
-                if (icon == null) return;
+                if (icon == null) return null;
                 using var bmp = icon.ToBitmap();
                 using var ms = new MemoryStream();
                 bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-                imageBytes = ms.ToArray();
+                return AutoCropIcon(ms.ToArray()); // Win32 图标同样过一遍智能裁切
             });
 
             if (imageBytes != null && imageBytes.Length > 0)
             {
-                var ras = new InMemoryRandomAccessStream();
-                using var dw = new DataWriter(ras.GetOutputStreamAt(0));
-                dw.WriteBytes(imageBytes);
-                await dw.StoreAsync();
-                
-                var bitmapImage = new BitmapImage();
-                await bitmapImage.SetSourceAsync(ras);
-                AppIcon = bitmapImage;
-                OnPropertyChanged(nameof(AppIcon));
-                OnPropertyChanged(nameof(FallbackVisibility));
-                OnPropertyChanged(nameof(RealIconVisibility));
+                await RenderIconFromBytesAsync(imageBytes);
             }
         }
         catch { }
+    }
+
+    private async Task RenderIconFromBytesAsync(byte[] imageBytes)
+    {
+        var ras = new InMemoryRandomAccessStream();
+        using var dw = new DataWriter(ras.GetOutputStreamAt(0));
+        dw.WriteBytes(imageBytes);
+        await dw.StoreAsync();
+        
+        var bitmapImage = new BitmapImage();
+        await bitmapImage.SetSourceAsync(ras);
+        AppIcon = bitmapImage;
+        OnPropertyChanged(nameof(AppIcon));
+        OnPropertyChanged(nameof(FallbackVisibility));
+        OnPropertyChanged(nameof(RealIconVisibility));
+    }
+
+    // 世界级核心算法：基于 Alpha 通道智能裁切透明废边，使一切图标饱满统一
+    private byte[]? AutoCropIcon(byte[] imageBytes)
+    {
+        try
+        {
+            using var ms = new MemoryStream(imageBytes);
+            using var bmp = new System.Drawing.Bitmap(ms);
+
+            var rect = new System.Drawing.Rectangle(0, 0, bmp.Width, bmp.Height);
+            var bmpData = bmp.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+
+            int bytesCount = Math.Abs(bmpData.Stride) * bmp.Height;
+            byte[] rgbValues = new byte[bytesCount];
+            System.Runtime.InteropServices.Marshal.Copy(bmpData.Scan0, rgbValues, 0, bytesCount);
+            bmp.UnlockBits(bmpData);
+
+            int top = bmp.Height, bottom = -1, left = bmp.Width, right = -1;
+            int stride = bmpData.Stride;
+
+            for (int y = 0; y < bmp.Height; y++)
+            {
+                int rowStart = y * stride;
+                for (int x = 0; x < bmp.Width; x++)
+                {
+                    byte alpha = rgbValues[rowStart + x * 4 + 3];
+                    if (alpha > 10) // 容忍微弱抗锯齿产生的低透明像素
+                    {
+                        if (x < left) left = x;
+                        if (x > right) right = x;
+                        if (y < top) top = y;
+                        if (y > bottom) bottom = y;
+                    }
+                }
+            }
+
+            if (left > right || top > bottom) return imageBytes; // 全透明图片直接返回
+
+            int width = right - left + 1;
+            int height = bottom - top + 1;
+
+            // 增加 5% 相对的舒适内边距，防贴边
+            int margin = Math.Max(2, (int)(Math.Max(width, height) * 0.05));
+            int maxDim = Math.Max(width, height) + margin * 2; 
+            
+            // 如果原图本身就已经很饱满了 (占 90% 以上)，直接放行以节约性能
+            if (maxDim >= Math.Max(bmp.Width, bmp.Height) * 0.9) return imageBytes;
+
+            int centerX = left + width / 2;
+            int centerY = top + height / 2;
+
+            int cropLeft = Math.Max(0, centerX - maxDim / 2);
+            int cropTop = Math.Max(0, centerY - maxDim / 2);
+            int cropRight = Math.Min(bmp.Width - 1, centerX + maxDim / 2);
+            int cropBottom = Math.Min(bmp.Height - 1, centerY + maxDim / 2);
+
+            int finalWidth = cropRight - cropLeft + 1;
+            int finalHeight = cropBottom - cropTop + 1;
+
+            using var croppedBmp = new System.Drawing.Bitmap(finalWidth, finalHeight);
+            using var g = System.Drawing.Graphics.FromImage(croppedBmp);
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+            
+            g.DrawImage(bmp, new System.Drawing.Rectangle(0, 0, finalWidth, finalHeight), 
+                        new System.Drawing.Rectangle(cropLeft, cropTop, finalWidth, finalHeight), System.Drawing.GraphicsUnit.Pixel);
+
+            using var outMs = new MemoryStream();
+            croppedBmp.Save(outMs, System.Drawing.Imaging.ImageFormat.Png);
+            return outMs.ToArray();
+        }
+        catch
+        {
+            return imageBytes; // 如果解码或运算出现任何意外，安全回退到原图
+        }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

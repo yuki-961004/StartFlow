@@ -17,7 +17,7 @@ namespace StartFlow.ViewModels;
 public class TierGroup : ObservableCollection<AppItemViewModel>
 {
     public string TierName { get; }
-    public bool IsDisabledGroup { get; }
+    public int TierIndex { get; }
 
     // 新增：保存当前 Tier 运行时的环境配置
     public int DelaySeconds { get; set; } = 0;
@@ -73,14 +73,14 @@ public class TierGroup : ObservableCollection<AppItemViewModel>
     public string ExpandIconGlyph => _isExpanded ? "\uE738" : "\uE710"; // 展开时显示减号，折叠时显示加号
 
     public Visibility ToggleVisibility => 
-        IsDisabledGroup ? Visibility.Visible : Visibility.Collapsed;
+        (TierIndex == 0 || TierIndex == 1) ? Visibility.Visible : Visibility.Collapsed;
 
-    public TierGroup(string tierName, bool isDisabledGroup, IEnumerable<AppItemViewModel> items) 
+    public TierGroup(string tierName, int tierIndex, IEnumerable<AppItemViewModel> items) 
         : base(items)
     {
         TierName = tierName;
-        IsDisabledGroup = isDisabledGroup;
-        _isExpanded = !isDisabledGroup; // 禁用组默认折叠 (false)，其他组默认展开 (true)
+        TierIndex = tierIndex;
+        _isExpanded = tierIndex != 0; // 禁用组默认折叠 (false)，其他组默认展开 (true)
 
         foreach (var item in items)
         {
@@ -143,17 +143,6 @@ public class TierConfig
     public bool IsSequential { get; set; }
 }
 
-public class GlobalSettings
-{
-    public bool EnableCurtain { get; set; } = false;
-    public int TargetCurtainTier { get; set; } = 1; // 标记幕布跟在哪个 T 级后面结束
-    public string CurtainImagePath { get; set; } = string.Empty;
-    public double CurtainBlurOpacity { get; set; } = 1.0;
-    public bool CurtainShowSpinner { get; set; } = true;
-    public string CurtainText { get; set; } = "Wait for it...";
-    public bool CurtainEnableAnimation { get; set; } = true;
-}
-
 public class EditableTier : INotifyPropertyChanged
 {
     private string _name = string.Empty;
@@ -195,9 +184,6 @@ public class MainViewModel : INotifyPropertyChanged
     // 全局所有的 T 级名称列表
     public ObservableCollection<string> AvailableTiers { get; } = new();
 
-    public GlobalSettings GlobalSettings { get; private set; } = new();
-
-    private readonly string _globalSettingsPath;
     private readonly string _tierConfigsPath;
 
     private bool _isLoading;
@@ -221,26 +207,6 @@ public class MainViewModel : INotifyPropertyChanged
         _scanner = new StartupItemScanner();
         _configService = new ConfigurationService();
         _tierConfigsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "StartFlow", "tier_configs.json");
-        _globalSettingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "StartFlow", "global_settings.json");
-        LoadGlobalSettings();
-    }
-
-    public void LoadGlobalSettings()
-    {
-        try
-        {
-            if (File.Exists(_globalSettingsPath))
-            {
-                string json = File.ReadAllText(_globalSettingsPath);
-                GlobalSettings = JsonSerializer.Deserialize<GlobalSettings>(json) ?? new GlobalSettings();
-            }
-        }
-        catch { }
-    }
-
-    public void SaveGlobalSettings()
-    {
-        try { File.WriteAllText(_globalSettingsPath, JsonSerializer.Serialize(GlobalSettings)); } catch { }
     }
 
     public async Task LoadItemsAsync()
@@ -252,12 +218,57 @@ public class MainViewModel : INotifyPropertyChanged
         AvailableTiers.Clear();
 
         var tiers = _configService.LoadTiers();
+        
+        // 如果存在旧配置且没有 Ignored，执行无缝迁移
+        bool needsMigration = false;
+        if (tiers.Count > 1 && !tiers[1].Equals("Ignored", StringComparison.OrdinalIgnoreCase))
+        {
+            tiers.Insert(1, "Ignored");
+            needsMigration = true;
+        }
+
         foreach (var t in tiers)
         {
             AvailableTiers.Add(t);
         }
 
         var savedRules = _configService.LoadRules();
+        
+        if (needsMigration)
+        {
+            for (int i = 0; i < savedRules.Count; i++)
+            {
+                if (savedRules[i].PriorityLevel >= 1)
+                {
+                    savedRules[i] = savedRules[i] with { PriorityLevel = savedRules[i].PriorityLevel + 1 };
+                }
+            }
+            _configService.SaveRules(savedRules);
+            _configService.SaveTiers(tiers);
+            
+            try
+            {
+                if (File.Exists(_tierConfigsPath))
+                {
+                    string json = File.ReadAllText(_tierConfigsPath);
+                    var oldTierConfigs = JsonSerializer.Deserialize<Dictionary<string, TierConfig>>(json);
+                    if (oldTierConfigs != null)
+                    {
+                        var newTierConfigs = new Dictionary<string, TierConfig>();
+                        foreach(var kvp in oldTierConfigs)
+                        {
+                            if (int.TryParse(kvp.Key, out int oldKey) && oldKey >= 1)
+                                newTierConfigs[(oldKey + 1).ToString()] = kvp.Value;
+                            else
+                                newTierConfigs[kvp.Key] = kvp.Value;
+                        }
+                        File.WriteAllText(_tierConfigsPath, JsonSerializer.Serialize(newTierConfigs));
+                    }
+                }
+            }
+            catch { }
+        }
+
         var items = await Task.Run(() => _scanner.ScanAll());
         var viewModels = new List<AppItemViewModel>();
 
@@ -268,7 +279,7 @@ public class MainViewModel : INotifyPropertyChanged
 
             // 如果本地有保存过的规则就使用，否则给它默认分配到 T1
             var rule = savedRules.FirstOrDefault(r => r.AppItemId == item.Id) 
-                       ?? ScheduleRule.CreateDefault(item.Id);
+                       ?? ScheduleRule.CreateDefault(item.Id, 2);
                        
             // 保护机制：如果规则要求的索引大于现有列表，自动填充防止崩溃
             while (rule.PriorityLevel >= AvailableTiers.Count)
@@ -301,11 +312,10 @@ public class MainViewModel : INotifyPropertyChanged
             string tierName = group.Key < AvailableTiers.Count 
                 ? AvailableTiers[group.Key] 
                 : $"Tier {group.Key}";
-            bool isDisabled = group.Key == 0;
             
             // 恢复拖拽后的组内顺序
             var sortedGroup = group.OrderBy(x => x.Rule.OrderIndex);
-            var tierGroup = new TierGroup(tierName, isDisabled, sortedGroup);
+            var tierGroup = new TierGroup(tierName, group.Key, sortedGroup);
             
             if (tierConfigs != null && tierConfigs.TryGetValue(group.Key.ToString(), out var cfg))
             {
@@ -345,9 +355,26 @@ public class MainViewModel : INotifyPropertyChanged
                 vm.UpdateRule(updatedRule); // 同步更新 ViewModel 内存状态
                 rulesToSave.Add(updatedRule);
                 
-                // 核心原理：所有被纳入管理的软件，统统在系统层面禁用！
-                // 这样 Windows 就不会乱拉起它们，一切由 Orchestrator 按顺序指挥
-                hijacker.DisableItem(vm.Item);
+                // 核心分流机制：
+                if (group.TierIndex == 1) 
+                {
+                    // Ignored 组：完全放行，让 Windows 原生接管启动
+                    hijacker.EnableItem(vm.Item);
+                }
+                else if (group.TierIndex == 0)
+                {
+                    // Disabled 组：彻底禁用
+                    hijacker.DisableItem(vm.Item);
+                }
+                else
+                {
+                    // T1+ 托管组：由大管家调度拉起，因此必须在系统层禁用。
+                    // 唯一例外：要求静默的 UWP 我们将其放行，交由 Windows BAM 完美后台唤醒。
+                    if (vm.Item.Sources.Contains(StartupSource.UwpApp) && updatedRule.IsSilent)
+                        hijacker.EnableItem(vm.Item);
+                    else
+                        hijacker.DisableItem(vm.Item);
+                }
             }
         }
         _configService.SaveRules(rulesToSave);
@@ -381,19 +408,19 @@ public class MainViewModel : INotifyPropertyChanged
     {
         var newTiersList = modifiedTiers.ToList();
         
-        var newAvailableTiers = new List<string> { AvailableTiers[0] }; 
+        var newAvailableTiers = new List<string> { AvailableTiers[0], AvailableTiers[1] }; 
         foreach (var tier in newTiersList)
         {
             newAvailableTiers.Add(tier.Name);
         }
 
         var oldToNewIndexMap = new Dictionary<int, int>();
-        for (int i = 1; i < AvailableTiers.Count; i++)
+        for (int i = 2; i < AvailableTiers.Count; i++)
         {
             var found = newTiersList.FindIndex(t => t.OriginalIndex == i);
             if (found >= 0)
             {
-                oldToNewIndexMap[i] = found + 1; 
+                oldToNewIndexMap[i] = found + 2; 
             }
             else
             {
@@ -485,21 +512,25 @@ public class MainViewModel : INotifyPropertyChanged
         await LoadItemsAsync();
     }
 
-    // 核心定位逻辑：自动打开文件所在位置、或注册表位置、或UWP设置
-    public void OpenItemLocation(AppItem item)
+    // 核心定位逻辑：针对多路注册的情况，精确打开指定的来源位置
+    public void OpenSpecificLocation(AppItem item, StartupSource source)
     {
         try
         {
-            if (item.Source == StartupSource.StartupFolder || 
-                item.Source == StartupSource.CommonStartupFolder)
+            if (source == StartupSource.StartupFolder || 
+                source == StartupSource.CommonStartupFolder)
             {
                 if (File.Exists(item.FilePath))
                 {
                     System.Diagnostics.Process.Start(
                         "explorer.exe", $"/select,\"{item.FilePath}\"");
                 }
+                else
+                {
+                    System.Diagnostics.Process.Start("explorer.exe", Environment.GetFolderPath(source == StartupSource.StartupFolder ? Environment.SpecialFolder.Startup : Environment.SpecialFolder.CommonStartup));
+                }
             }
-            else if (item.Source == StartupSource.UwpApp)
+            else if (source == StartupSource.UwpApp)
             {
                 // 唤起 Win11 自带的启动项管理页面，UWP 可以在那里检查
                 var info = new System.Diagnostics.ProcessStartInfo(
@@ -509,7 +540,7 @@ public class MainViewModel : INotifyPropertyChanged
             else
             {
                 // 黑客技巧：写入 LastKey 让注册表编辑器打开时自动跳转
-                string keyPath = GetRegistryKeyString(item.Source);
+                string keyPath = GetRegistryKeyString(source);
                 if (!string.IsNullOrEmpty(keyPath))
                 {
                     using var reg = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(
