@@ -97,34 +97,6 @@ public class AppItemViewModel : INotifyPropertyChanged
         }
     }
 
-    // 双向绑定：自定义启动参数
-    public string CustomArguments
-    {
-        get => _rule.CustomArguments;
-        set
-        {
-            if (_rule.CustomArguments != value)
-            {
-                _rule = _rule with { CustomArguments = value ?? string.Empty };
-                OnPropertyChanged();
-            }
-        }
-    }
-
-    // 双向绑定：强制隐藏窗口样式
-    public bool ForceHidden
-    {
-        get => _rule.ForceHidden;
-        set
-        {
-            if (_rule.ForceHidden != value)
-            {
-                _rule = _rule with { ForceHidden = value };
-                OnPropertyChanged();
-            }
-        }
-    }
-
     // 双向绑定：启动前强制延迟的秒数（使用字符串以适配 UI TextBox 输入）
     public string DelaySecondsStr
     {

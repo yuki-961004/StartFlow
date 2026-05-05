@@ -6,21 +6,27 @@ namespace StartFlow.Core;
 
 public class RegistryHijacker
 {
-    // 禁用状态的二进制特征 (0x03 开头表示禁用)
-    private static readonly byte[] DisabledValue =
+    // 动态生成禁用状态二进制特征 (附带当前有效的时间戳，防止被系统或驱动视为损坏)
+    private static byte[] GetDisabledValue()
     {
-        0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-    };
+        byte[] val = new byte[12];
+        val[0] = 0x03;
+        BitConverter.GetBytes(DateTime.UtcNow.ToFileTime()).CopyTo(val, 4);
+        return val;
+    }
 
-    // 启用状态的二进制特征 (0x02 开头表示启用)
-    private static readonly byte[] EnabledValue =
+    // 动态生成启用状态二进制特征
+    private static byte[] GetEnabledValue()
     {
-        0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-    };
+        byte[] val = new byte[12];
+        val[0] = 0x02;
+        BitConverter.GetBytes(DateTime.UtcNow.ToFileTime()).CopyTo(val, 4);
+        return val;
+    }
 
     public bool DisableItem(AppItem item)
     {
-        bool success = ModifyStartupApprovedKey(item, DisabledValue);
+        bool success = ModifyStartupApprovedKey(item, GetDisabledValue());
         // UWP 需要“双管齐下”：既修改沙盒状态，又修改 StartupApproved 供任务管理器显示
         if (item.Source == StartupSource.UwpApp) success |= ModifyUwpState(item, 1); // State 1 = Disabled
         return success;
@@ -28,7 +34,7 @@ public class RegistryHijacker
 
     public bool EnableItem(AppItem item)
     {
-        bool success = ModifyStartupApprovedKey(item, EnabledValue);
+        bool success = ModifyStartupApprovedKey(item, GetEnabledValue());
         if (item.Source == StartupSource.UwpApp) success |= ModifyUwpState(item, 2); // State 2 = Enabled
         return success;
     }
@@ -47,6 +53,14 @@ public class RegistryHijacker
         if (item.Source == StartupSource.UwpApp)
         {
             valueName = item.Arguments.Replace('|', '!');
+        }
+        else if (item.Source == StartupSource.StartupFolder || item.Source == StartupSource.CommonStartupFolder)
+        {
+            // 启动文件夹必须匹配带后缀的完整文件名（如 .lnk），否则任务管理器无法建立映射
+            if (!string.IsNullOrEmpty(item.FilePath))
+            {
+                valueName = System.IO.Path.GetFileName(item.FilePath);
+            }
         }
 
         try

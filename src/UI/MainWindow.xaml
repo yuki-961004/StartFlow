@@ -32,6 +32,7 @@
 
             <!-- 定义差异化显示选单模板 -->
             <local:ShortTierNameConverter x:Key="ShortTierNameConverter" />
+            <local:TierCustomNameConverter x:Key="TierCustomNameConverter" />
             <local:TierTemplateSelector x:Key="TierTemplateSelector">
                 <local:TierTemplateSelector.SelectedTemplate>
                     <DataTemplate>
@@ -55,11 +56,26 @@
                     
                     <FontIcon Grid.Column="0" Glyph="&#xE700;" FontSize="12" Foreground="Gray" Margin="0,0,12,0" VerticalAlignment="Center" ToolTipService.ToolTip="Drag to reorder" />
                     <TextBlock Grid.Column="1" Text="{x:Bind Name, Mode=OneWay}" Visibility="{x:Bind IsNotEditingVisibility, Mode=OneWay}" VerticalAlignment="Center" />
-                    <TextBox Grid.Column="1" Text="{x:Bind Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Visibility="{x:Bind IsEditingVisibility, Mode=OneWay}" VerticalAlignment="Center" LostFocus="ManageTierItem_TextBoxLostFocus" KeyDown="ManageTierItem_TextBoxKeyDown" />
+                    <TextBox Grid.Column="1" Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource TierCustomNameConverter}}" Visibility="{x:Bind IsEditingVisibility, Mode=OneWay}" VerticalAlignment="Center" LostFocus="ManageTierItem_TextBoxLostFocus" KeyDown="ManageTierItem_TextBoxKeyDown" />
                     <Button Grid.Column="2" Background="Transparent" BorderThickness="0" Click="RemoveManageTier_Click" ToolTipService.ToolTip="Remove Tier">
                         <FontIcon Glyph="&#xE74D;" FontSize="12" />
                     </Button>
                 </Grid>
+            </DataTemplate>
+            
+            <DataTemplate x:Key="CurtainDragItemTemplate">
+                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="6" Padding="12,8" Margin="0,4">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Grid.Column="0" Glyph="&#xE700;" FontSize="12" Foreground="Gray" Margin="0,0,12,0" VerticalAlignment="Center" ToolTipService.ToolTip="Drag to reorder" />
+                        <TextBlock Grid.Column="1" Text="{Binding Name}" FontWeight="{Binding FontWeight}" Foreground="{Binding TextColor}" VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
             </DataTemplate>
             </ResourceDictionary>
         </Grid.Resources>
@@ -225,27 +241,6 @@
                                         Height="32" Width="40" Padding="0"
                                         ToolTipService.ToolTip="Toggle Silent (Run hidden/minimized)">
                                     <FontIcon Glyph="{x:Bind local:MainWindow.GetSilentIcon(IsSilent), Mode=OneWay}" FontSize="16" />
-                                </Button>
-
-                                <!-- 单个程序的高级启动设置（参数/窗口样式） -->
-                                <Button Background="Transparent" BorderThickness="0"
-                                        Height="32" Width="32" Padding="0"
-                                        ToolTipService.ToolTip="Advanced Launch Options">
-                                    <Button.Flyout>
-                                        <Flyout>
-                                            <StackPanel Spacing="12" Width="260">
-                                                <TextBlock Text="Launch Options" FontWeight="SemiBold" />
-                                                <TextBox Header="Startup Arguments" 
-                                                         Text="{x:Bind CustomArguments, Mode=TwoWay}"
-                                                         PlaceholderText="e.g. -silent or /minimized"
-                                                         ToolTipService.ToolTip="Leave empty for default behavior." />
-                                                <CheckBox Content="Force Hidden Window Style" 
-                                                          IsChecked="{x:Bind ForceHidden, Mode=TwoWay}" />
-                                                <TextBlock Text="Warning: Some apps (e.g. Rainmeter, TranslucentTB) might crash or show errors if given unknown arguments or forced hidden." TextWrapping="Wrap" FontSize="12" Foreground="Gray" />
-                                            </StackPanel>
-                                        </Flyout>
-                                    </Button.Flyout>
-                                    <FontIcon Glyph="&#xE713;" FontSize="14" />
                                 </Button>
 
                                 <TextBlock Text="Tier:" VerticalAlignment="Center" 

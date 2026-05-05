@@ -19,10 +19,19 @@ public class ProcessMonitor
 
         // 2. 如果进程为空或瞬间退出 (例如 UWP 的 explorer 启动器)
         // 我们平滑降级为 2 秒的保护性延迟，防止下一个 T 级被瞬间并发拉起
-        if (process == null || process.HasExited)
+        try
         {
-            await Task.Delay(TimeSpan.FromSeconds(2));
-            return;
+            if (process == null || process.HasExited)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2));
+                return;
+            }
+        }
+        catch (Exception)
+        {
+            // 核心修复：如果目标程序是 SignalRGB 这种需要管理员权限的软件，
+            // 普通权限的 StartFlow 尝试读取 HasExited 会抛出 Access Denied (拒绝访问) 异常。
+            // 遇到此异常直接忽略，默认认为该进程依然存活，继续往下走到各自的监控分支。
         }
 
         // 3. 根据条件路由到不同的监控策略

@@ -1,0 +1,43 @@
+<Window
+    x:Class="StartFlow.UI.CurtainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="StartFlow Loading Screen">
+    
+    <Grid Background="Black" x:Name="RootGrid" RenderTransformOrigin="0.5,0.5">
+        <Grid.RenderTransform>
+            <ScaleTransform x:Name="RootScale" ScaleX="1" ScaleY="1"/>
+        </Grid.RenderTransform>
+        
+        <Image x:Name="BackgroundImage" Stretch="UniformToFill" />
+        <Rectangle x:Name="BlurOverlay" />
+
+        <!-- 水滴落水瞬间激起的波纹涟漪 (采用低透明度白光，模拟纯净的水面边缘折射高光) -->
+        <Ellipse x:Name="Ripple" Stroke="#40FFFFFF" StrokeThickness="2.5" 
+                 Width="100" Height="100" HorizontalAlignment="Center" VerticalAlignment="Center"
+                 Opacity="0" RenderTransformOrigin="0.5,0.5">
+            <Ellipse.RenderTransform>
+                <ScaleTransform x:Name="RippleScale" ScaleX="0" ScaleY="0" />
+            </Ellipse.RenderTransform>
+        </Ellipse>
+
+        <!-- 跟随的极微弱内圈折射，增加物理流体的波浪层次 -->
+        <Ellipse x:Name="Ripple2" Stroke="#15FFFFFF" StrokeThickness="1.5" 
+                 Width="100" Height="100" HorizontalAlignment="Center" VerticalAlignment="Center"
+                 Opacity="0" RenderTransformOrigin="0.5,0.5">
+            <Ellipse.RenderTransform>
+                <ScaleTransform x:Name="RippleScale2" ScaleX="0" ScaleY="0" />
+            </Ellipse.RenderTransform>
+        </Ellipse>
+
+        <StackPanel x:Name="ContentPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="24" RenderTransformOrigin="0.5,0.5">
+            <StackPanel.RenderTransform>
+                <ScaleTransform x:Name="ContentScale" ScaleX="1" ScaleY="1"/>
+            </StackPanel.RenderTransform>
+            <ProgressRing x:Name="Spinner" IsActive="True" Width="80" Height="80" Foreground="White" />
+            <TextBlock x:Name="LoadingText" Text="Wait for it..." 
+                       FontSize="24" FontWeight="SemiLight" 
+                       Foreground="White" HorizontalAlignment="Center"/>
+        </StackPanel>
+    </Grid>
+</Window>

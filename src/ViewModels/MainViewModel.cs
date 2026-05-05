@@ -143,6 +143,17 @@ public class TierConfig
     public bool IsSequential { get; set; }
 }
 
+public class GlobalSettings
+{
+    public bool EnableCurtain { get; set; } = false;
+    public int TargetCurtainTier { get; set; } = 1; // 标记幕布跟在哪个 T 级后面结束
+    public string CurtainImagePath { get; set; } = string.Empty;
+    public double CurtainBlurOpacity { get; set; } = 1.0;
+    public bool CurtainShowSpinner { get; set; } = true;
+    public string CurtainText { get; set; } = "Wait for it...";
+    public bool CurtainEnableAnimation { get; set; } = true;
+}
+
 public class EditableTier : INotifyPropertyChanged
 {
     private string _name = string.Empty;
@@ -184,6 +195,9 @@ public class MainViewModel : INotifyPropertyChanged
     // 全局所有的 T 级名称列表
     public ObservableCollection<string> AvailableTiers { get; } = new();
 
+    public GlobalSettings GlobalSettings { get; private set; } = new();
+
+    private readonly string _globalSettingsPath;
     private readonly string _tierConfigsPath;
 
     private bool _isLoading;
@@ -207,6 +221,26 @@ public class MainViewModel : INotifyPropertyChanged
         _scanner = new StartupItemScanner();
         _configService = new ConfigurationService();
         _tierConfigsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "StartFlow", "tier_configs.json");
+        _globalSettingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "StartFlow", "global_settings.json");
+        LoadGlobalSettings();
+    }
+
+    public void LoadGlobalSettings()
+    {
+        try
+        {
+            if (File.Exists(_globalSettingsPath))
+            {
+                string json = File.ReadAllText(_globalSettingsPath);
+                GlobalSettings = JsonSerializer.Deserialize<GlobalSettings>(json) ?? new GlobalSettings();
+            }
+        }
+        catch { }
+    }
+
+    public void SaveGlobalSettings()
+    {
+        try { File.WriteAllText(_globalSettingsPath, JsonSerializer.Serialize(GlobalSettings)); } catch { }
     }
 
     public async Task LoadItemsAsync()
@@ -300,7 +334,7 @@ public class MainViewModel : INotifyPropertyChanged
             tierConfigs[tierIndex.ToString()] = new TierConfig 
             { 
                 DelaySeconds = group.DelaySeconds, 
-                IsSequential = group.IsSequential 
+                IsSequential = group.IsSequential
             };
 
             int orderIndex = 0;
