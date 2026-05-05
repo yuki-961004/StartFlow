@@ -19,6 +19,9 @@ public record ScheduleRule(
 {
     public bool IsSilent { get; init; } = false;
     public int DelaySeconds { get; init; } = 0;
+    public int OrderIndex { get; init; } = 0;
+    public string CustomArguments { get; init; } = string.Empty;
+    public bool ForceHidden { get; init; } = false;
 
     // 提供纯函数，生成默认规则（例如默认分配到 T1 且无延迟）
     public static ScheduleRule CreateDefault(Guid appItemId)

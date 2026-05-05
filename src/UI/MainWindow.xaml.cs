@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using System.IO;
 using System.Text.Json;
+using System.Linq;
 using Windows.Graphics;
 using StartFlow.ViewModels;
 
@@ -22,6 +23,7 @@ public sealed partial class MainWindow : Window
     private ElementTheme _currentTheme = ElementTheme.Dark; // 默认深色主题
     private readonly string _uiSettingsPath;
     private UISettings _uiSettings = new();
+    private System.Collections.ObjectModel.ObservableCollection<EditableTier>? _tempTiers;
 
     public MainWindow()
     {
@@ -35,7 +37,42 @@ public sealed partial class MainWindow : Window
         this.Activated += MainWindow_Activated;
         this.Closed += MainWindow_Closed;
         
+        // 设置运行时窗口和任务栏图标
+        try
+        {
+            string iconPath = Path.Combine(AppContext.BaseDirectory, "StartFlow.ico");
+            if (File.Exists(iconPath))
+            {
+                this.AppWindow.SetIcon(iconPath);
+            }
+        }
+        catch { }
+
         LoadUISettings();
+    }
+
+    // UI 辅助方法：禁用组 (Disabled) 不需要一键静默按钮
+    public static Visibility GetSilentButtonVisibility(string tierName)
+    {
+        return string.Equals(tierName, "Disabled", StringComparison.OrdinalIgnoreCase) 
+            ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+        // UI 辅助方法：根据静默状态返回对应的图标
+        public static string GetSilentIcon(bool isSilent)
+        {
+            return isSilent ? "\uED1A" : "\uE890"; // \uED1A(带斜线的闭眼), \uE890(正常睁眼)
+        }
+
+    public static string GetShortTierName(string fullName)
+    {
+        if (string.IsNullOrWhiteSpace(fullName)) return string.Empty;
+        if (fullName.StartsWith("T", StringComparison.OrdinalIgnoreCase) && fullName.Length > 1 && char.IsDigit(fullName[1]))
+        {
+            int spaceIndex = fullName.IndexOf(' ');
+            if (spaceIndex > 0) return fullName.Substring(0, spaceIndex);
+        }
+        return fullName;
     }
 
     // 纯UI层副作用：恢复窗口尺寸与主题
@@ -95,64 +132,95 @@ public sealed partial class MainWindow : Window
         _ = ViewModel.LoadItemsAsync();
     }
 
-    private async void AddTier_Click(object sender, RoutedEventArgs e)
+    private async void ManageTiers_Click(object sender, RoutedEventArgs e)
     {
-        var inputTextBox = new TextBox 
-        { 
-            PlaceholderText = "e.g. Others (Optional)",
-            Width = 300
+        _tempTiers = new System.Collections.ObjectModel.ObservableCollection<EditableTier>();
+        for (int i = 1; i < ViewModel.AvailableTiers.Count; i++)
+        {
+            _tempTiers.Add(new EditableTier { Name = ViewModel.AvailableTiers[i], OriginalIndex = i });
+        }
+
+        var listView = new ListView
+        {
+            ItemsSource = _tempTiers,
+            SelectionMode = ListViewSelectionMode.None,
+            CanReorderItems = true,
+            AllowDrop = true,
+            ItemTemplate = (DataTemplate)((FrameworkElement)this.Content).Resources["ManageTierItemTemplate"],
+            Footer = new Button 
+            { 
+                Content = new FontIcon { Glyph = "\uE710", FontSize = 14 }, 
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                Height = 40
+            }
         };
         
+        ((Button)listView.Footer).Click += (s, args) =>
+        {
+            _tempTiers.Add(new EditableTier { Name = $"T{_tempTiers.Count + 1} (New Tier)", OriginalIndex = -1 });
+        };
+
         var dialog = new ContentDialog
         {
-            Title = "Add New Tier",
-            Content = inputTextBox,
-            PrimaryButtonText = "Add",
+            Title = "Manage Tiers",
+            Content = new ScrollViewer { Content = listView, MaxHeight = 400 },
+            PrimaryButtonText = "Apply",
             CloseButtonText = "Cancel",
             XamlRoot = this.Content.XamlRoot,
-            DefaultButton = ContentDialogButton.Primary,
             RequestedTheme = _currentTheme
         };
 
         var result = await dialog.ShowAsync();
         if (result == ContentDialogResult.Primary)
         {
-            ViewModel.AddNewTier(inputTextBox.Text);
-            _ = ViewModel.LoadItemsAsync();
+            await ViewModel.ApplyTiersManagementAsync(_tempTiers);
+        }
+        _tempTiers = null;
+    }
+
+    private void ManageTierItem_DoubleTapped(object sender, Microsoft.UI.Xaml.Input.DoubleTappedRoutedEventArgs e)
+    {
+        if (sender is FrameworkElement element && element.DataContext is EditableTier tier)
+        {
+            tier.IsEditing = true;
+            if (element is Grid grid)
+            {
+                var textBox = grid.Children.OfType<TextBox>().FirstOrDefault();
+                if (textBox != null)
+                {
+                    textBox.Focus(FocusState.Programmatic);
+                    textBox.SelectAll();
+                }
+            }
         }
     }
 
-    private async void RemoveTier_Click(object sender, RoutedEventArgs e)
+    private void ManageTierItem_TextBoxLostFocus(object sender, RoutedEventArgs e)
     {
-        // 获取除了 Disabled (索引0) 之外的所有 Tier 供用户选择
-        var removableTiers = new System.Collections.Generic.List<string>();
-        for (int i = 1; i < ViewModel.AvailableTiers.Count; i++)
+        if (sender is FrameworkElement element && element.DataContext is EditableTier tier)
         {
-            removableTiers.Add(ViewModel.AvailableTiers[i]);
+            tier.IsEditing = false;
         }
+    }
 
-        var listView = new ListView
+    private void ManageTierItem_TextBoxKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Enter)
         {
-            ItemsSource = removableTiers,
-            SelectionMode = ListViewSelectionMode.Single
-        };
+            if (sender is FrameworkElement element && element.DataContext is EditableTier tier)
+            {
+                tier.IsEditing = false;
+            }
+        }
+    }
 
-        var dialog = new ContentDialog
+    private void RemoveManageTier_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement element && element.DataContext is EditableTier tier && _tempTiers != null)
         {
-            Title = "Select a Tier to Remove",
-            Content = listView,
-            PrimaryButtonText = "Remove",
-            CloseButtonText = "Cancel",
-            XamlRoot = this.Content.XamlRoot,
-            RequestedTheme = _currentTheme
-        };
-
-        var result = await dialog.ShowAsync();
-        if (result == ContentDialogResult.Primary && listView.SelectedIndex >= 0)
-        {
-            // ListView 的 SelectedIndex 0 对应 AvailableTiers 的 1
-            int realIndex = listView.SelectedIndex + 1;
-            await ViewModel.RemoveTierAsync(realIndex);
+            _tempTiers.Remove(tier);
         }
     }
 
@@ -190,23 +258,38 @@ public sealed partial class MainWindow : Window
         if (Microsoft.UI.Windowing.AppWindowTitleBar.IsCustomizationSupported())
         {
             var titleBar = this.AppWindow.TitleBar;
-            var transparent = Microsoft.UI.Colors.Transparent;
-            titleBar.ButtonBackgroundColor = transparent;
-            titleBar.ButtonInactiveBackgroundColor = transparent;
             
             if (theme == ElementTheme.Dark)
             {
+                var darkBg = Windows.UI.Color.FromArgb(255, 32, 32, 32);
+                titleBar.BackgroundColor = darkBg;
+                titleBar.ButtonBackgroundColor = darkBg;
+                titleBar.InactiveBackgroundColor = darkBg;
+                titleBar.ButtonInactiveBackgroundColor = darkBg;
+                
+                titleBar.ForegroundColor = Microsoft.UI.Colors.White;
                 titleBar.ButtonForegroundColor = Microsoft.UI.Colors.White;
+                titleBar.ButtonHoverBackgroundColor = Windows.UI.Color.FromArgb(255, 50, 50, 50);
                 titleBar.ButtonHoverForegroundColor = Microsoft.UI.Colors.White;
-                titleBar.ButtonHoverBackgroundColor = 
-                    Windows.UI.Color.FromArgb(25, 255, 255, 255);
+                titleBar.ButtonPressedBackgroundColor = Windows.UI.Color.FromArgb(255, 70, 70, 70);
+                titleBar.ButtonPressedForegroundColor = Microsoft.UI.Colors.White;
+                titleBar.InactiveForegroundColor = Microsoft.UI.Colors.Gray;
             }
             else
             {
+                var lightBg = Windows.UI.Color.FromArgb(255, 243, 243, 243);
+                titleBar.BackgroundColor = lightBg;
+                titleBar.ButtonBackgroundColor = lightBg;
+                titleBar.InactiveBackgroundColor = lightBg;
+                titleBar.ButtonInactiveBackgroundColor = lightBg;
+                
+                titleBar.ForegroundColor = Microsoft.UI.Colors.Black;
                 titleBar.ButtonForegroundColor = Microsoft.UI.Colors.Black;
+                titleBar.ButtonHoverBackgroundColor = Windows.UI.Color.FromArgb(255, 220, 220, 220);
                 titleBar.ButtonHoverForegroundColor = Microsoft.UI.Colors.Black;
-                titleBar.ButtonHoverBackgroundColor = 
-                    Windows.UI.Color.FromArgb(25, 0, 0, 0);
+                titleBar.ButtonPressedBackgroundColor = Windows.UI.Color.FromArgb(255, 200, 200, 200);
+                titleBar.ButtonPressedForegroundColor = Microsoft.UI.Colors.Black;
+                titleBar.InactiveForegroundColor = Microsoft.UI.Colors.Gray;
             }
         }
 
@@ -244,15 +327,119 @@ public sealed partial class MainWindow : Window
         }
     }
 
+        private void ToggleAppSilent_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement element && 
+                element.DataContext is AppItemViewModel item)
+            {
+                item.IsSilent = !item.IsSilent;
+            }
+        }
+
+    private void ToggleTierActions_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement element && element.DataContext is TierGroup group)
+        {
+            group.ToggleActions();
+        }
+    }
+
     private void SetTierSilent_Click(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement element && 
             element.DataContext is TierGroup group)
         {
+            // 检查是否该组内的所有项目都已经设为静默
+            bool allSilent = true;
             foreach (var item in group)
             {
-                item.IsSilent = true;
+                if (!item.IsSilent)
+                {
+                    allSilent = false;
+                    break;
+                }
+            }
+
+            // 如果全都静默了，就全部取消静默；否则全部设为静默
+            foreach (var item in group)
+            {
+                item.IsSilent = !allSilent;
             }
         }
+    }
+
+    private async void TierSettings_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement element && 
+                element.DataContext is TierGroup group)
+            {
+                var stackPanel = new StackPanel { Spacing = 15 };
+
+                var delayInput = new TextBox
+                {
+                    Header = "Tier Startup Delay (seconds)",
+                    PlaceholderText = "e.g. 5",
+                    Text = group.DelaySeconds.ToString() 
+                };
+
+                var modeLabel = new TextBlock { Text = "Execution Mode", Margin = new Thickness(0, 10, 0, 0) };
+                
+                var radioParallel = new RadioButton { Content = "Parallel Startup (All at once)", IsChecked = !group.IsSequential };
+                var radioSequential = new RadioButton { Content = "Sequential Startup (One by one based on order)", IsChecked = group.IsSequential };
+                
+                var radioStack = new StackPanel { Spacing = 8 };
+                radioStack.Children.Add(radioParallel);
+                radioStack.Children.Add(radioSequential);
+
+                stackPanel.Children.Add(delayInput);
+                stackPanel.Children.Add(modeLabel);
+                stackPanel.Children.Add(radioStack);
+
+                var dialog = new ContentDialog
+                {
+                    Title = $"{group.TierName} Settings",
+                    Content = stackPanel,
+                    PrimaryButtonText = "Save",
+                    CloseButtonText = "Cancel",
+                    XamlRoot = this.Content.XamlRoot,
+                    RequestedTheme = _currentTheme
+                };
+
+                var result = await dialog.ShowAsync();
+                if (result == ContentDialogResult.Primary)
+                {
+                    if (int.TryParse(delayInput.Text, out int delay))
+                    {
+                        group.DelaySeconds = delay;
+                    }
+                    group.IsSequential = radioSequential.IsChecked == true;
+                }
+            }
+        }
+    }
+
+public class ShortTierNameConverter : Microsoft.UI.Xaml.Data.IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language)
+    {
+        if (value is string fullName)
+        {
+            return MainWindow.GetShortTierName(fullName);
+        }
+        return value;
+    }
+    public object ConvertBack(object value, Type targetType, object parameter, string language) => throw new NotImplementedException();
+}
+
+public class TierTemplateSelector : Microsoft.UI.Xaml.Controls.DataTemplateSelector
+{
+    public DataTemplate? SelectedTemplate { get; set; }
+    public DataTemplate? DropdownTemplate { get; set; }
+
+    protected override DataTemplate? SelectTemplateCore(object item, DependencyObject container)
+    {
+        // ComboBoxItem 意味着当前控件正处于下拉列表的内部渲染流程
+        if (container is Microsoft.UI.Xaml.Controls.ComboBoxItem) return DropdownTemplate;
+        return SelectedTemplate;
     }
 }

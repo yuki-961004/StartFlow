@@ -63,6 +63,12 @@ public class AppItemViewModel : INotifyPropertyChanged
 
     public ScheduleRule Rule => _rule;
 
+    // 允许更新内部 Rule 以保持内存和本地数据一致
+    public void UpdateRule(ScheduleRule newRule)
+    {
+        _rule = newRule;
+    }
+
     // 下拉框索引直接对应优先级数字 (0=Disabled, 1=T1...)
     public int PriorityIndex
     {
@@ -86,6 +92,34 @@ public class AppItemViewModel : INotifyPropertyChanged
             if (_rule.IsSilent != value)
             {
                 _rule = _rule with { IsSilent = value };
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    // 双向绑定：自定义启动参数
+    public string CustomArguments
+    {
+        get => _rule.CustomArguments;
+        set
+        {
+            if (_rule.CustomArguments != value)
+            {
+                _rule = _rule with { CustomArguments = value ?? string.Empty };
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    // 双向绑定：强制隐藏窗口样式
+    public bool ForceHidden
+    {
+        get => _rule.ForceHidden;
+        set
+        {
+            if (_rule.ForceHidden != value)
+            {
+                _rule = _rule with { ForceHidden = value };
                 OnPropertyChanged();
             }
         }

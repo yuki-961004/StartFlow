@@ -3,6 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:viewmodels="using:StartFlow.ViewModels"
+    xmlns:local="using:StartFlow.UI"
     Title="StartFlow - Delayed Startup Manager">
 
     <!-- 开启 Win11 云母毛玻璃背景特效 -->
@@ -12,10 +13,55 @@
 
     <Grid Padding="24" Background="Transparent">
         <Grid.Resources>
-            <!-- 用于将普通集合转换为带区块头(Group)的视图源 -->
-            <CollectionViewSource x:Name="TierGroupsSource" 
-                                  IsSourceGrouped="True" 
-                                  Source="{x:Bind ViewModel.TierGroups, Mode=OneWay}" />
+            <ResourceDictionary>
+            <!-- 自定义主题颜色字典，实现亮/暗色模式下的精准灰度控制 -->
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="AppIconBackgroundBrush" Color="#E5E5E5" />
+                    <SolidColorBrush x:Key="AppIconForegroundBrush" Color="#707070" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="AppIconBackgroundBrush" Color="#666666" />
+                    <SolidColorBrush x:Key="AppIconForegroundBrush" Color="#E0E0E0" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Default">
+                    <SolidColorBrush x:Key="AppIconBackgroundBrush" Color="#666666" />
+                    <SolidColorBrush x:Key="AppIconForegroundBrush" Color="#E0E0E0" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+
+            <!-- 定义差异化显示选单模板 -->
+            <local:ShortTierNameConverter x:Key="ShortTierNameConverter" />
+            <local:TierTemplateSelector x:Key="TierTemplateSelector">
+                <local:TierTemplateSelector.SelectedTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding Converter={StaticResource ShortTierNameConverter}}" VerticalAlignment="Center" />
+                    </DataTemplate>
+                </local:TierTemplateSelector.SelectedTemplate>
+                <local:TierTemplateSelector.DropdownTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}" VerticalAlignment="Center" />
+                    </DataTemplate>
+                </local:TierTemplateSelector.DropdownTemplate>
+            </local:TierTemplateSelector>
+
+            <DataTemplate x:Key="ManageTierItemTemplate" x:DataType="viewmodels:EditableTier">
+                <Grid Margin="0,4" Background="Transparent" DoubleTapped="ManageTierItem_DoubleTapped">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    
+                    <FontIcon Grid.Column="0" Glyph="&#xE700;" FontSize="12" Foreground="Gray" Margin="0,0,12,0" VerticalAlignment="Center" ToolTipService.ToolTip="Drag to reorder" />
+                    <TextBlock Grid.Column="1" Text="{x:Bind Name, Mode=OneWay}" Visibility="{x:Bind IsNotEditingVisibility, Mode=OneWay}" VerticalAlignment="Center" />
+                    <TextBox Grid.Column="1" Text="{x:Bind Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Visibility="{x:Bind IsEditingVisibility, Mode=OneWay}" VerticalAlignment="Center" LostFocus="ManageTierItem_TextBoxLostFocus" KeyDown="ManageTierItem_TextBoxKeyDown" />
+                    <Button Grid.Column="2" Background="Transparent" BorderThickness="0" Click="RemoveManageTier_Click" ToolTipService.ToolTip="Remove Tier">
+                        <FontIcon Glyph="&#xE74D;" FontSize="12" />
+                    </Button>
+                </Grid>
+            </DataTemplate>
+            </ResourceDictionary>
         </Grid.Resources>
 
         <Grid.RowDefinitions>
@@ -24,44 +70,46 @@
         </Grid.RowDefinitions>
 
         <Grid Grid.Row="0" Margin="0,0,0,20">
-            <TextBlock Text="System Startup Items" FontSize="24"
+            <TextBlock Text="System Startup Apps" FontSize="24"
                        FontWeight="Bold" VerticalAlignment="Center" />
                        
             <CommandBar HorizontalAlignment="Right" Background="Transparent"
                         DefaultLabelPosition="Collapsed">
                 <!-- 次要操作：添加/删除 -->
                 <AppBarButton Icon="Add" Click="AddButton_Click" 
-                              Label="Add App" />
-                <AppBarButton Icon="NewFolder" Click="AddTier_Click" 
-                              Label="Add Tier" />
-                <AppBarButton Icon="Delete" Click="RemoveTier_Click" 
-                              Label="Remove Tier" />
+                              Label="Add App" ToolTipService.ToolTip="Add App" />
+                <AppBarButton Icon="List" Click="ManageTiers_Click" 
+                              Label="Manage Tiers" ToolTipService.ToolTip="Manage Tiers" />
                 <AppBarSeparator />
                 <!-- 核心操作：保存、刷新、主题、设置 -->
                 <AppBarButton Icon="Save" Click="SaveButton_Click" 
-                              Label="Save Configuration" />
+                              Label="Save Configuration" ToolTipService.ToolTip="Save Configuration" />
                 <AppBarButton Icon="Refresh" Click="RefreshButton_Click" 
-                              Label="Refresh List" />
+                              Label="Refresh List" ToolTipService.ToolTip="Refresh List" />
                 <AppBarButton x:Name="ThemeButton" Click="ThemeButton_Click" 
-                              Label="Toggle Theme" />
+                              Label="Toggle Theme" ToolTipService.ToolTip="Toggle Theme" />
                 <AppBarButton Icon="Setting" Click="SettingsButton_Click" 
-                              Label="Settings" />
+                              Label="Settings" ToolTipService.ToolTip="Settings" />
             </CommandBar>
         </Grid>
 
         <ListView Grid.Row="1" 
-                  ItemsSource="{Binding Source={StaticResource TierGroupsSource}}"
+                  ItemsSource="{x:Bind ViewModel.TierGroups, Mode=OneWay}"
                   SelectionMode="None">
             
-            <!-- 区块头部设计 (如 Tier 1 Queue) -->
-            <ListView.GroupStyle>
-                <GroupStyle>
-                    <GroupStyle.HeaderTemplate>
+            <!-- 使用内嵌 List 替代官方 Group 从而解锁原生拖放物理动画 -->
+            <ListView.ItemTemplate>
                         <DataTemplate x:DataType="viewmodels:TierGroup">
-                            <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,15,0,10">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,15,0,10">
+                                    <!-- 加入位移过渡动画：当内部元素增加导致宽度变化时，平滑挤开其他元素 -->
+                                    <StackPanel.Transitions>
+                                        <TransitionCollection>
+                                            <RepositionThemeTransition />
+                                        </TransitionCollection>
+                                    </StackPanel.Transitions>
                                 <TextBlock Text="{x:Bind TierName}" FontSize="18" 
-                                           FontWeight="SemiBold" VerticalAlignment="Center"
-                                           Foreground="{ThemeResource SystemAccentColor}" />
+                                           FontWeight="SemiBold" VerticalAlignment="Center" />
                                 <Button Click="ToggleGroup_Click" 
                                         Visibility="{x:Bind ToggleVisibility, Mode=OneWay}"
                                         Background="Transparent" BorderThickness="0"
@@ -69,20 +117,47 @@
                                         ToolTipService.ToolTip="Toggle Expand">
                                     <FontIcon Glyph="{x:Bind ExpandIconGlyph, Mode=OneWay}" FontSize="14" />
                                 </Button>
-                                <Button Click="SetTierSilent_Click" 
-                                        Visibility="{x:Bind ToggleVisibility, Mode=OneWay}"
-                                        Content="All Silent" Height="28" Padding="8,0"
-                                        Background="Transparent" BorderThickness="1"
-                                        VerticalAlignment="Center">
-                                </Button>
-                            </StackPanel>
-                        </DataTemplate>
-                    </GroupStyle.HeaderTemplate>
-                </GroupStyle>
-            </ListView.GroupStyle>
 
-            <ListView.ItemTemplate>
-                <DataTemplate x:DataType="viewmodels:AppItemViewModel">
+                                <!-- 新增：右向箭头切换按钮 -->
+                                <Button Click="ToggleTierActions_Click" 
+                                        Visibility="{x:Bind local:MainWindow.GetSilentButtonVisibility(TierName), Mode=OneWay}"
+                                        Background="Transparent" BorderThickness="0" Padding="4" VerticalAlignment="Center"
+                                        ToolTipService.ToolTip="Toggle Tier Actions">
+                                    <FontIcon Glyph="{x:Bind ActionsToggleIconGlyph, Mode=OneWay}" FontSize="12" />
+                                </Button>
+
+                                <!-- 被折叠的面板：时钟设置与一键静默 -->
+                                <StackPanel Orientation="Horizontal" Visibility="{x:Bind ActionsVisibility, Mode=OneWay}" Spacing="6">
+                                    <!-- 加入进出场过渡动画：点击箭头时，面板会伴随渐变和滑动丝滑出现 -->
+                                    <StackPanel.Transitions>
+                                        <TransitionCollection>
+                                            <AddDeleteThemeTransition />
+                                        </TransitionCollection>
+                                    </StackPanel.Transitions>
+                                    <Button Click="TierSettings_Click" 
+                                            Height="28" Width="36" Padding="0"
+                                            Background="Transparent" BorderThickness="0"
+                                            VerticalAlignment="Center"
+                                            ToolTipService.ToolTip="Tier Execution Settings (Delay &amp; Mode)">
+                                        <FontIcon Glyph="&#xE121;" FontSize="16" />
+                                    </Button>
+                                    <Button Click="SetTierSilent_Click" 
+                                            Height="28" Width="36" Padding="0"
+                                            Background="Transparent" BorderThickness="0"
+                                            VerticalAlignment="Center"
+                                            ToolTipService.ToolTip="Toggle Silent for all apps in this tier">
+                                        <FontIcon Glyph="{x:Bind local:MainWindow.GetSilentIcon(IsAllSilent), Mode=OneWay}" FontSize="16" />
+                                    </Button>
+                                </StackPanel>
+                            </StackPanel>
+
+                                <!-- 内嵌 ListView，专门负责完美的原生拖拽物理动画 -->
+                                <ListView ItemsSource="{x:Bind}"
+                                          SelectionMode="None"
+                                          CanReorderItems="True"
+                                          AllowDrop="True">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="viewmodels:AppItemViewModel">
                     <!-- 具有呼吸感和阴影边框的卡片设计 -->
                     <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -90,6 +165,13 @@
                             Margin="0,2,0,2" 
                             HorizontalAlignment="Stretch"
                             Visibility="{x:Bind ItemVisibility, Mode=OneWay}">
+                        <!-- 为 App 卡片加上过渡动画：当一整个 Tier 被折叠/展开时，卡片会丝滑地依次飞入/淡出 -->
+                        <Border.Transitions>
+                            <TransitionCollection>
+                                <AddDeleteThemeTransition />
+                                <RepositionThemeTransition />
+                            </TransitionCollection>
+                        </Border.Transitions>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
@@ -97,24 +179,31 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
 
-                            <!-- 占位图标：后续可以通过 P/Invoke 提取真实 EXE 图标 -->
-                            <Border Width="32" Height="32" CornerRadius="4" 
-                                    Background="{ThemeResource SystemAccentColorLight3}"
-                                    Margin="0,0,12,0">
-                                <Grid>
-                                    <FontIcon Glyph="{x:Bind IconGlyph}" FontSize="16" 
-                                              Foreground="{ThemeResource SystemAccentColorDark1}"
-                                              Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
-                                    <Image Source="{x:Bind AppIcon, Mode=OneWay}" 
-                                           Width="24" Height="24" Stretch="Uniform" 
-                                           Visibility="{x:Bind RealIconVisibility, Mode=OneWay}"
-                                           RenderTransformOrigin="0.5,0.5">
-                                        <Image.RenderTransform>
-                                            <ScaleTransform ScaleX="{x:Bind IconScale}" ScaleY="{x:Bind IconScale}" />
-                                        </Image.RenderTransform>
-                                    </Image>
-                                </Grid>
-                            </Border>
+                            <StackPanel Orientation="Horizontal" Grid.Column="0" VerticalAlignment="Center">
+                                <!-- 拖拽手柄：三条横线图标 -->
+                                <FontIcon Glyph="&#xE700;" FontSize="12" Foreground="Gray" 
+                                          Margin="0,0,14,0" VerticalAlignment="Center"
+                                          ToolTipService.ToolTip="Drag to reorder" />
+                                
+                                <!-- 占位图标：后续可以通过 P/Invoke 提取真实 EXE 图标 -->
+                                <Border Width="32" Height="32" CornerRadius="4" 
+                                        Background="{ThemeResource AppIconBackgroundBrush}"
+                                        Margin="0,0,12,0">
+                                    <Grid>
+                                        <FontIcon Glyph="{x:Bind IconGlyph}" FontSize="16" 
+                                                  Foreground="{ThemeResource AppIconForegroundBrush}"
+                                                  Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
+                                        <Image Source="{x:Bind AppIcon, Mode=OneWay}" 
+                                               Width="24" Height="24" Stretch="Uniform" 
+                                               Visibility="{x:Bind RealIconVisibility, Mode=OneWay}"
+                                               RenderTransformOrigin="0.5,0.5">
+                                            <Image.RenderTransform>
+                                                <ScaleTransform ScaleX="{x:Bind IconScale}" ScaleY="{x:Bind IconScale}" />
+                                            </Image.RenderTransform>
+                                        </Image>
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
 
                             <!-- 文本信息 -->
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
@@ -129,22 +218,42 @@
                             <!-- 右侧交互区：高级参数与T级别选择器 -->
                             <StackPanel Grid.Column="2" Orientation="Horizontal" 
                                         VerticalAlignment="Center" Spacing="10">
-                                        
-                                <!-- 延迟时间输入 -->
-                                <TextBox Text="{x:Bind DelaySecondsStr, Mode=TwoWay}" 
-                                         PlaceholderText="Delay(s)" Width="70" Height="32"
-                                         ToolTipService.ToolTip="Delay in seconds before start" />
 
                                 <!-- 静默启动开关 -->
-                                <ToggleButton IsChecked="{x:Bind IsSilent, Mode=TwoWay}"
-                                              Content="Silent" Height="32"
-                                              ToolTipService.ToolTip="Run hidden/minimized" />
+                                <Button Click="ToggleAppSilent_Click"
+                                        Background="Transparent" BorderThickness="0"
+                                        Height="32" Width="40" Padding="0"
+                                        ToolTipService.ToolTip="Toggle Silent (Run hidden/minimized)">
+                                    <FontIcon Glyph="{x:Bind local:MainWindow.GetSilentIcon(IsSilent), Mode=OneWay}" FontSize="16" />
+                                </Button>
+
+                                <!-- 单个程序的高级启动设置（参数/窗口样式） -->
+                                <Button Background="Transparent" BorderThickness="0"
+                                        Height="32" Width="32" Padding="0"
+                                        ToolTipService.ToolTip="Advanced Launch Options">
+                                    <Button.Flyout>
+                                        <Flyout>
+                                            <StackPanel Spacing="12" Width="260">
+                                                <TextBlock Text="Launch Options" FontWeight="SemiBold" />
+                                                <TextBox Header="Startup Arguments" 
+                                                         Text="{x:Bind CustomArguments, Mode=TwoWay}"
+                                                         PlaceholderText="e.g. -silent or /minimized"
+                                                         ToolTipService.ToolTip="Leave empty for default behavior." />
+                                                <CheckBox Content="Force Hidden Window Style" 
+                                                          IsChecked="{x:Bind ForceHidden, Mode=TwoWay}" />
+                                                <TextBlock Text="Warning: Some apps (e.g. Rainmeter, TranslucentTB) might crash or show errors if given unknown arguments or forced hidden." TextWrapping="Wrap" FontSize="12" Foreground="Gray" />
+                                            </StackPanel>
+                                        </Flyout>
+                                    </Button.Flyout>
+                                    <FontIcon Glyph="&#xE713;" FontSize="14" />
+                                </Button>
 
                                 <TextBlock Text="Tier:" VerticalAlignment="Center" 
                                            Foreground="Gray" />
                                 <ComboBox SelectedIndex="{x:Bind PriorityIndex, Mode=TwoWay}" 
                                           ItemsSource="{x:Bind AvailableTiers}"
-                                          Width="120">
+                                          ItemTemplateSelector="{StaticResource TierTemplateSelector}"
+                                          Width="75" MinWidth="75">
                                 </ComboBox>
                                 
                                 <!-- 定位按钮 -->
@@ -156,7 +265,19 @@
                             </StackPanel>
                         </Grid>
                     </Border>
-                </DataTemplate>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                    <ListView.ItemContainerStyle>
+                                        <Style TargetType="ListViewItem">
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            <Setter Property="Padding" Value="0" />
+                                            <Setter Property="Margin" Value="0" />
+                                            <Setter Property="MinHeight" Value="0" />
+                                        </Style>
+                                    </ListView.ItemContainerStyle>
+                                </ListView>
+                            </StackPanel>
+                        </DataTemplate>
             </ListView.ItemTemplate>
             
             <ListView.ItemContainerStyle>
@@ -169,5 +290,11 @@
                 </Style>
             </ListView.ItemContainerStyle>
         </ListView>
+
+        <!-- 全局加载过渡动画 (Windows 标准转圈进度条) -->
+        <ProgressRing Grid.Row="1"
+                      IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}"
+                      Width="64" Height="64"
+                      HorizontalAlignment="Center" VerticalAlignment="Center" />
     </Grid>
 </Window>
