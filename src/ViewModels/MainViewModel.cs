@@ -278,8 +278,9 @@ public class MainViewModel : INotifyPropertyChanged
             if (item.Name.Equals("StartFlow", StringComparison.OrdinalIgnoreCase)) continue;
 
             // 如果本地有保存过的规则就使用，否则给它默认分配到 T1
+            int defaultPriority = GetDefaultPriority(item);
             var rule = savedRules.FirstOrDefault(r => r.AppItemId == item.Id) 
-                       ?? ScheduleRule.CreateDefault(item.Id, 2);
+                       ?? ScheduleRule.CreateDefault(item.Id, defaultPriority);
                        
             // 保护机制：如果规则要求的索引大于现有列表，自动填充防止崩溃
             while (rule.PriorityLevel >= AvailableTiers.Count)
@@ -537,6 +538,30 @@ public class MainViewModel : INotifyPropertyChanged
                     "ms-settings:startupapps") { UseShellExecute = true };
                 System.Diagnostics.Process.Start(info);
             }
+            else if (source == StartupSource.ScheduledTask)
+            {
+                var info = new System.Diagnostics.ProcessStartInfo(
+                    "taskschd.msc") { UseShellExecute = true };
+                System.Diagnostics.Process.Start(info);
+            }
+            else if (source == StartupSource.ApplicationSetting)
+            {
+                string path = GetApplicationSettingPath(item);
+                if (File.Exists(path))
+                {
+                    System.Diagnostics.Process.Start(
+                        "explorer.exe", $"/select,\"{path}\"");
+                }
+                else if (Directory.Exists(path))
+                {
+                    System.Diagnostics.Process.Start("explorer.exe", path);
+                }
+                else if (File.Exists(item.FilePath))
+                {
+                    System.Diagnostics.Process.Start(
+                        "explorer.exe", $"/select,\"{item.FilePath}\"");
+                }
+            }
             else
             {
                 // 黑客技巧：写入 LastKey 让注册表编辑器打开时自动跳转
@@ -570,5 +595,43 @@ public class MainViewModel : INotifyPropertyChanged
                 @"Computer\HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run",
             _ => @"Computer\HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run"
         };
+    }
+
+    private int GetDefaultPriority(AppItem item)
+    {
+        if (item.Sources.Contains(StartupSource.ScheduledTask) ||
+            item.Sources.Contains(StartupSource.ApplicationSetting))
+        {
+            return 1;
+        }
+
+        return 2;
+    }
+
+    private string GetApplicationSettingPath(AppItem item)
+    {
+        string appData = Environment.GetFolderPath(
+            Environment.SpecialFolder.ApplicationData);
+        string localAppData = Environment.GetFolderPath(
+            Environment.SpecialFolder.LocalApplicationData);
+
+        if (item.Name.Contains("clash", StringComparison.OrdinalIgnoreCase))
+        {
+            return Path.Combine(
+                appData,
+                "io.github.clash-verge-rev.clash-verge-rev",
+                "verge.yaml");
+        }
+
+        if (item.Name.Contains("PowerToys", StringComparison.OrdinalIgnoreCase))
+        {
+            return Path.Combine(
+                localAppData,
+                "Microsoft",
+                "PowerToys",
+                "settings.json");
+        }
+
+        return Path.GetDirectoryName(item.FilePath) ?? string.Empty;
     }
 }

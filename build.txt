@@ -1,0 +1,9 @@
+# StartFlow
+msbuild /restore /t:Publish /p:Configuration=Release /p:Platform=x64
+
+# metaSDT
+# 安装cmake, 安装 visual studio, 选develop c++
+# 告诉cmake在这里编译
+cmake -S Cpp -B Cpp/build -DABCPP_BUILD_TESTS=ON 
+# 开始编译
+cmake --build Cpp/build --config Release

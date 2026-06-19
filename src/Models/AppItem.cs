@@ -15,7 +15,9 @@ public enum StartupSource
     RegistryCurrentUserRunOnce,
     RegistryLocalMachineRunOnce,
     RegistryGhostItem,
-    UwpApp
+    UwpApp,
+    ApplicationSetting,
+    ScheduledTask
 }
 
 public record AppItem(

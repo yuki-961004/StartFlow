@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Principal;
 using Microsoft.Win32;
 using StartFlow.Models;
 
@@ -31,6 +32,8 @@ public class StartupItemScanner
             Registry.CurrentUser,
             RunKeyPath,
             StartupSource.RegistryCurrentUser));
+
+        rawItems.AddRange(ScanCurrentUserSidRunKey());
 
         rawItems.AddRange(ScanRegistry(
             Registry.CurrentUser,
@@ -65,16 +68,21 @@ public class StartupItemScanner
         var uwpScanner = new UwpScanner();
         rawItems.AddRange(uwpScanner.ScanAllUwpStartupTasks());
 
+        var knownApplicationScanner = new KnownApplicationStartupScanner();
+        rawItems.AddRange(knownApplicationScanner.ScanAll());
+
+        var scheduledTaskScanner = new ScheduledTaskStartupScanner();
+        rawItems.AddRange(scheduledTaskScanner.ScanAll());
+
         // 4. [核心优化] 合并去重：如果发现同一个程序在多处注册了启动项，将其所有源合并为一个单一程序卡片
         var mergedItems = new List<AppItem>();
-        var grouped = rawItems.GroupBy(x => new { 
-            Name = x.Name.ToLowerInvariant(), 
-            Target = x.FilePath.ToLowerInvariant() 
-        });
+        var grouped = rawItems.GroupBy(GetMergeKey);
 
         foreach (var g in grouped)
         {
-            var first = g.First();
+            var first = g
+                .OrderBy(x => GetSourceRank(x.Source))
+                .First();
             var combinedSources = g.SelectMany(x => x.Sources).Distinct().ToArray();
             mergedItems.Add(AppItem.Create(first.Name, first.FilePath, first.Arguments, combinedSources));
         }
@@ -85,10 +93,6 @@ public class StartupItemScanner
             Registry.CurrentUser, ApprovedRunPath));
         approvedItems.AddRange(ScanStartupApproved(
             Registry.LocalMachine, ApprovedRunPath));
-        approvedItems.AddRange(ScanStartupApproved(
-            Registry.CurrentUser, ApprovedFolder));
-        approvedItems.AddRange(ScanStartupApproved(
-            Registry.LocalMachine, ApprovedFolder));
 
         // 6. 合并幽灵项：如果发现新名字，说明是残留在注册表中的历史幽灵项
         foreach (var approved in approvedItems)
@@ -135,6 +139,75 @@ public class StartupItemScanner
         }
 
         return items;
+    }
+
+    private string GetMergeKey(AppItem item)
+    {
+        string filePath = item.FilePath.Trim().ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(filePath) &&
+            !filePath.Equals(
+                "uwp_app_or_disabled_item",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            string fileName = Path.GetFileName(filePath);
+            if (IsSharedLauncher(fileName))
+            {
+                string arguments = item.Arguments.Trim().ToLowerInvariant();
+                return $"{filePath}|{arguments}";
+            }
+
+            return filePath;
+        }
+
+        return item.Name.Trim().ToLowerInvariant();
+    }
+
+    private bool IsSharedLauncher(string fileName)
+    {
+        return fileName.Equals("wscript.exe", StringComparison.OrdinalIgnoreCase) ||
+               fileName.Equals("cscript.exe", StringComparison.OrdinalIgnoreCase) ||
+               fileName.Equals("cmd.exe", StringComparison.OrdinalIgnoreCase) ||
+               fileName.Equals("powershell.exe", StringComparison.OrdinalIgnoreCase) ||
+               fileName.Equals("pwsh.exe", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private int GetSourceRank(StartupSource source)
+    {
+        return source switch
+        {
+            StartupSource.RegistryCurrentUser => 0,
+            StartupSource.RegistryLocalMachine => 1,
+            StartupSource.RegistryLocalMachineWow64 => 2,
+            StartupSource.StartupFolder => 3,
+            StartupSource.CommonStartupFolder => 4,
+            StartupSource.ScheduledTask => 5,
+            StartupSource.ApplicationSetting => 6,
+            StartupSource.UwpApp => 7,
+            StartupSource.RegistryGhostItem => 8,
+            _ => 9
+        };
+    }
+
+    private IEnumerable<AppItem> ScanCurrentUserSidRunKey()
+    {
+        try
+        {
+            string? userSid = WindowsIdentity.GetCurrent().User?.Value;
+            if (string.IsNullOrWhiteSpace(userSid))
+            {
+                return Enumerable.Empty<AppItem>();
+            }
+
+            string subKeyPath = $@"{userSid}\{RunKeyPath}";
+            return ScanRegistry(
+                Registry.Users,
+                subKeyPath,
+                StartupSource.RegistryCurrentUser);
+        }
+        catch (Exception)
+        {
+            return Enumerable.Empty<AppItem>();
+        }
     }
 
     private IEnumerable<AppItem> ScanStartupFolder(
